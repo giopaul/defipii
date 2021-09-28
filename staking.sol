@@ -313,6 +313,7 @@ contract Staking is Context, Ownable {
     }
     
     uint MIN_STAKE_AMOUNT = 100;
+    uint MAX_STAKE_AMOUNT = 10000;
     uint REWARD_DIVIDER = 10**8;
     
     IBEP20 stakingToken;
@@ -385,24 +386,25 @@ contract Staking is Context, Ownable {
     }
     
     function stake(uint256 _amount) public {
-        require((block.timestamp > stakeStartDate) , "Staking Pool is locked for three months period!");
-        require(_amount >= MIN_STAKE_AMOUNT);
+        require((block.timestamp > stakeStartDate) , "Staking Pool is locked for fixed period!");
+        require((_amount >= MIN_STAKE_AMOUNT), "Amount is less than Minimum stake limit!");
+        require((_amount <= MAX_STAKE_AMOUNT), "Amount is greater than Maximum stake simit!");
         require(stakingToken.transferFrom(msg.sender, address(this), _amount), "Stake required!");
         if (stakes[msg.sender].length == 0) {
             addStakeholder(msg.sender);
         }
-        stakes[msg.sender].push(StakingInfo(_amount, block.timestamp, rewardPercent));
+        stakes[msg.sender].push(StakingInfo(_amount, block.timestamp ,rewardPercent));
         emit Staked(msg.sender, _amount);
     }
 
     function unstake() public {
-        require((block.timestamp <= stakeEndDate) , "Staking Pool will unlocked after fixed period!");
+        require((block.timestamp <= stakeEndDate) , "Staking Pool will be unlocked after fixed period!");
         uint withdrawAmount = 0;
         for (uint j = 0; j < stakes[msg.sender].length; j += 1) {
             uint amount = stakes[msg.sender][j].amount;
             withdrawAmount = withdrawAmount.add(amount);
             
-            uint rewardAmount = amount.mul((block.timestamp - stakes[msg.sender][j].depositDate).mul(stakes[msg.sender][j].rewardPercent));
+            uint rewardAmount = amount.mul((stakeEndDate - stakeStartDate).mul(stakes[msg.sender][j].rewardPercent));
             rewardAmount = rewardAmount.div(REWARD_DIVIDER);
             withdrawAmount = withdrawAmount.add(rewardAmount.div(100));
         }
@@ -421,5 +423,6 @@ contract Staking is Context, Ownable {
     function withdrawTokens(address receiver, uint _amount) public onlyOwner {
         ownerTokensAmount = ownerTokensAmount.sub(_amount);
         require(stakingToken.transfer(receiver, _amount), "Not enough tokens on contract!");
-    }   
+    }
+       
 }
