@@ -312,27 +312,32 @@ contract Staking is Context, Ownable {
         uint rewardPercent;
     }
     
-    uint MIN_STAKE_AMOUNT = 100;
-    uint MAX_STAKE_AMOUNT = 10000;
-    uint REWARD_DIVIDER = 10**8;
+    uint public MIN_STAKE_AMOUNT;
+    uint public MAX_STAKE_AMOUNT;
+    uint public REWARD_DIVIDER = 10**8;
     
     IBEP20 stakingToken;
-    uint rewardPercent; //  percent value for per second  -> set 270 if you want 7% per month reward (because it will be divided by 10^8 for getting the small float number)
-    uint stakeStartDate;
-    uint stakeEndDate;
+    uint public rewardPercent; //  percent value for per second  -> set 270 if you want 7% per month reward (because it will be divided by 10^8 for getting the small float number)
+    uint public stakeStartDate;
+    uint public stakeEndDate;
     
-    string name = "Staking";
+    uint public totalStakes;
     
-    uint ownerTokensAmount;
+    string public name = "Staking";
+    
+    uint public ownerTokensAmount;
     address[] internal stakeholders;
     mapping(address => StakingInfo[]) internal stakes;
+    mapping(address => uint) public stakeholderIndex;
 
     //  percent value for per second  
     //  set 270 if you want 7% per month reward (because it will be divided by 10^8 for getting the small float number)
     //  7% per month = 7 / (30 * 24 * 60 * 60) ~ 0.00000270 (270 / 10^8)
-    constructor(IBEP20 _stakingToken, uint _rewardPercent, uint _stakeStartDate, uint _stakeEndDate) {
+    constructor(IBEP20 _stakingToken, uint _rewardPercent, uint _minStake, uint _maxStake, uint _stakeStartDate, uint _stakeEndDate) {
         stakingToken = _stakingToken;
         rewardPercent = _rewardPercent;
+        MIN_STAKE_AMOUNT = _minStake;
+        MAX_STAKE_AMOUNT = _maxStake;
         stakeStartDate =  _stakeStartDate;
         stakeEndDate = _stakeEndDate;
     }
@@ -344,69 +349,72 @@ contract Staking is Context, Ownable {
         rewardPercent = _rewardPercent;
     }
     
+    function changeMINSTAKE(uint _minStake) public onlyOwner {
+        MIN_STAKE_AMOUNT = _minStake;
+    }
+    
+    function changeMAXSTAKE(uint _maxStake) public onlyOwner {
+        MAX_STAKE_AMOUNT = _maxStake;
+    }
     
     function changeStakeStartDate(uint _startDate) public onlyOwner {
         stakeStartDate = _startDate;
     }
     
-    
     function changeStakeEndDate(uint _endDate) public onlyOwner {
         stakeEndDate = _endDate;
     }
-    
-    function totalStakes() public view returns(uint256) {
-        uint _totalStakes = 0;
-        for (uint i = 0; i < stakeholders.length; i += 1) {
-            for (uint j = 0; j < stakes[stakeholders[i]].length; j += 1)
-             _totalStakes = _totalStakes.add(stakes[stakeholders[i]][j].amount);
-        }
-        return _totalStakes;
-    }
-    
+   
     function isStakeholder(address _address) public view returns(bool, uint256) {
-        for (uint256 s = 0; s < stakeholders.length; s += 1) {
-            if (_address == stakeholders[s]) 
-                return (true, s);
-        }
-        return (false, 0);
+        uint s = stakeholderIndex[_address]; // 1-based index
+        if (s == 0) return (false, 0);
+        return (true, s - 1); // return 0-based index
     }
+    
 
     function addStakeholder(address _stakeholder) internal {
         (bool _isStakeholder, ) = isStakeholder(_stakeholder);
         if (!_isStakeholder)
             stakeholders.push(_stakeholder);
     }
-
+    
     function removeStakeholder(address _stakeholder) internal {
         (bool _isStakeholder, uint256 s) = isStakeholder(_stakeholder);
         if (_isStakeholder) {
-            stakeholders[s] = stakeholders[stakeholders.length - 1];
+            delete stakeholderIndex[_stakeholder];
+            address lastStakeholder = stakeholders[stakeholders.length - 1];
+            stakeholderIndex[lastStakeholder] = s+1; // 1-based index
+            stakeholders[s] = lastStakeholder;
             stakeholders.pop();
         }
-    }
+    }    
     
     function stake(uint256 _amount) public {
-        require((block.timestamp > stakeStartDate) , "Staking Pool is locked for fixed period!");
+        require(block.timestamp < stakeStartDate, "Staking Pool is locked for fixed period!");
         require((_amount >= MIN_STAKE_AMOUNT), "Amount is less than Minimum stake limit!");
         require((_amount <= MAX_STAKE_AMOUNT), "Amount is greater than Maximum stake simit!");
         require(stakingToken.transferFrom(msg.sender, address(this), _amount), "Stake required!");
+        
         if (stakes[msg.sender].length == 0) {
             addStakeholder(msg.sender);
         }
         stakes[msg.sender].push(StakingInfo(_amount, block.timestamp ,rewardPercent));
+        totalStakes = totalStakes.add(_amount);
         emit Staked(msg.sender, _amount);
     }
 
     function unstake() public {
-        require((block.timestamp <= stakeEndDate) , "Staking Pool will be unlocked after fixed period!");
+        require(block.timestamp > stakeEndDate , "Staking Pool will be unlocked after fixed period!");
         uint withdrawAmount = 0;
         for (uint j = 0; j < stakes[msg.sender].length; j += 1) {
             uint amount = stakes[msg.sender][j].amount;
             withdrawAmount = withdrawAmount.add(amount);
+            totalStakes = totalStakes.sub(amount);
             
             uint rewardAmount = amount.mul((stakeEndDate - stakeStartDate).mul(stakes[msg.sender][j].rewardPercent));
             rewardAmount = rewardAmount.div(REWARD_DIVIDER);
             withdrawAmount = withdrawAmount.add(rewardAmount.div(100));
+           
         }
         
         require(stakingToken.transfer(msg.sender, withdrawAmount), "Not enough tokens in contract!");
